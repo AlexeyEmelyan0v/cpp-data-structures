@@ -528,3 +528,18 @@ template <typename T>
 typename Vector<T>::iterator Vector<T>::erase(const_iterator pos) {
   return erase(pos, pos + 1);
 }
+
+template <typename T>
+bool operator==(const Vector<T>& left, const Vector<T>& right) {
+  if (left.size() != right.size()) {
+    return false;
+  }
+
+  for (size_t i = 0; i < left.size(); ++i) {
+    if (!(left[i] == right[i])) {
+      return false;
+    }
+  }
+
+  return true;
+}
