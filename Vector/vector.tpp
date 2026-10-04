@@ -543,3 +543,8 @@ bool operator==(const Vector<T>& left, const Vector<T>& right) {
 
   return true;
 }
+
+template <typename T>
+void swap(Vector<T>& left, Vector<T>& right) noexcept {
+  left.swap(right);
+}
