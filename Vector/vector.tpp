@@ -282,18 +282,46 @@ void Vector<T>::resize(size_t newsize) {
     return;
   }
 
-  reserve(newsize);
-  size_t index = size_;
+  if (newsize <= capacity_) {
+    size_t index = size_;
+
+    try {
+      for (; index < newsize; ++index) {
+        new (data_ + index) T();
+      }
+    } catch (...) {
+      destroy_elements(data_ + size_, index - size_);
+      throw;
+    }
+
+    size_ = newsize;
+    return;
+  }
+
+  T* newdata = reinterpret_cast<T*>(new char[newsize * sizeof(T)]);
+  size_t new_index = size_;
+  size_t old_index = 0;
 
   try {
-    for (; index < newsize; ++index) {
-      new (data_ + index) T();
+    for (; new_index < newsize; ++new_index) {
+      new (newdata + new_index) T();
+    }
+
+    for (; old_index < size_; ++old_index) {
+      new (newdata + old_index) T(std::move_if_noexcept(data_[old_index]));
     }
   } catch (...) {
-    destroy_elements(data_ + size_, index - size_);
+    destroy_elements(newdata, old_index);
+    destroy_elements(newdata + size_, new_index - size_);
+    delete[] reinterpret_cast<char*>(newdata);
     throw;
   }
 
+  destroy_elements(data_, size_);
+  delete[] reinterpret_cast<char*>(data_);
+
+  data_ = newdata;
+  capacity_ = newsize;
   size_ = newsize;
 }
 
