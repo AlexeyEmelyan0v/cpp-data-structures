@@ -29,7 +29,7 @@ class Vector {
 
   ~Vector();
 
-  Vector& operator=(Vector other);
+  Vector& operator=(const Vector& other);
   Vector& operator=(Vector&& other) noexcept;
 
   void reserve(size_t newcap);

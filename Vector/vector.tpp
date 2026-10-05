@@ -153,8 +153,9 @@ Vector<T>::~Vector() {
 }
 
 template <typename T>
-Vector<T>& Vector<T>::operator=(Vector other) {
-  swap(other);
+Vector<T>& Vector<T>::operator=(const Vector& other) {
+  Vector copy(other);
+  swap(copy);
   return *this;
 }
 
