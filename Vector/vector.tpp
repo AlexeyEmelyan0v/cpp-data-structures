@@ -14,11 +14,11 @@ void Vector<T>::reallocate_and_push(U&& value) {
   bool new_element_constructed = false;
 
   try {
-    new(newdata + size_) T(std::forward<U>(value));
+    new (newdata + size_) T(std::forward<U>(value));
     new_element_constructed = true;
 
     for (; index < size_; ++index) {
-      new(newdata + index) T(std::move_if_noexcept(data_[index]));
+      new (newdata + index) T(std::move_if_noexcept(data_[index]));
     }
   } catch (...) {
     destroy_elements(newdata, index);
@@ -48,11 +48,11 @@ T& Vector<T>::reallocate_and_emplace(Args&&... args) {
   bool new_element_constructed = false;
 
   try {
-    new(newdata + size_) T(std::forward<Args>(args)...);
+    new (newdata + size_) T(std::forward<Args>(args)...);
     new_element_constructed = true;
 
     for (; index < size_; ++index) {
-      new(newdata + index) T(std::move_if_noexcept(data_[index]));
+      new (newdata + index) T(std::move_if_noexcept(data_[index]));
     }
   } catch (...) {
     destroy_elements(newdata, index);
@@ -83,7 +83,7 @@ Vector<T>::Vector(const Vector& other): data_(nullptr), size_(0), capacity_(0) {
 
   try {
     for (; size_ < other.size_; ++size_) {
-      new(data_ + size_) T(other.data_[size_]);
+      new (data_ + size_) T(other.data_[size_]);
     }
   } catch (...) {
     destroy_elements(data_, size_);
@@ -106,7 +106,7 @@ Vector<T>::Vector(size_t count): data_(nullptr), size_(0), capacity_(0) {
 
   try {
     for (; size_ < count; ++size_) {
-      new(data_ + size_) T();
+      new (data_ + size_) T();
     }
   } catch (...) {
     destroy_elements(data_, size_);
@@ -121,7 +121,7 @@ Vector<T>::Vector(size_t count, const T& value): data_(nullptr), size_(0), capac
 
   try {
     for (; size_ < count; ++size_) {
-      new(data_ + size_) T(value);
+      new (data_ + size_) T(value);
     }
   } catch (...) {
     destroy_elements(data_, size_);
@@ -136,7 +136,7 @@ Vector<T>::Vector(std::initializer_list<T> init): data_(nullptr), size_(0), capa
 
   try {
     for (const T& value : init) {
-      new(data_ + size_) T(value);
+      new (data_ + size_) T(value);
       ++size_;
     }
   } catch (...) {
@@ -190,7 +190,7 @@ void Vector<T>::reserve(size_t newcap) {
 
   try {
     for (; index < size_; ++index) {
-      new(newdata + index) T(std::move_if_noexcept(data_[index]));
+      new (newdata + index) T(std::move_if_noexcept(data_[index]));
     }
   } catch (...) {
     destroy_elements(newdata, index);
@@ -207,7 +207,7 @@ void Vector<T>::reserve(size_t newcap) {
 template <typename T>
 void Vector<T>::push_back(const T& value) {
   if (size_ < capacity_) {
-    new(data_ + size_) T(value);
+    new (data_ + size_) T(value);
     ++size_;
     return;
   }
@@ -218,7 +218,7 @@ void Vector<T>::push_back(const T& value) {
 template <typename T>
 void Vector<T>::push_back(T&& value) {
   if (size_ < capacity_) {
-    new(data_ + size_) T(std::move(value));
+    new (data_ + size_) T(std::move(value));
     ++size_;
     return;
   }
@@ -287,7 +287,7 @@ void Vector<T>::resize(size_t newsize) {
 
   try {
     for (; index < newsize; ++index) {
-      new(data_ + index) T();
+      new (data_ + index) T();
     }
   } catch (...) {
     destroy_elements(data_ + size_, index - size_);
@@ -315,7 +315,7 @@ void Vector<T>::shrink_to_fit() {
 
   try {
     for (; index < size_; ++index) {
-      new(newdata + index) T(std::move_if_noexcept(data_[index]));
+      new (newdata + index) T(std::move_if_noexcept(data_[index]));
     }
   } catch (...) {
     destroy_elements(newdata, index);
@@ -381,7 +381,7 @@ template <typename T>
 template <typename... Args>
 T& Vector<T>::emplace_back(Args&&... args) {
   if (size_ < capacity_) {
-    new(data_ + size_) T(std::forward<Args>(args)...);
+    new (data_ + size_) T(std::forward<Args>(args)...);
     ++size_;
     return data_[size_ - 1];
   }
@@ -470,15 +470,15 @@ typename Vector<T>::iterator Vector<T>::insert(const_iterator pos, size_t count,
 
   try {
     for (; count_index < count; ++count_index) {
-      new(newdata + pos_ind + count_index) T(value);
+      new (newdata + pos_ind + count_index) T(value);
     }
 
     for (; index < pos_ind; ++index) {
-      new(newdata + index) T(std::move_if_noexcept(data_[index]));
+      new (newdata + index) T(std::move_if_noexcept(data_[index]));
     }
 
     for (; index < size_; ++index) {
-      new(newdata + count + index) T(std::move_if_noexcept(data_[index]));
+      new (newdata + count + index) T(std::move_if_noexcept(data_[index]));
     }
   } catch (...) {
     destroy_elements(newdata + pos_ind, count_index);

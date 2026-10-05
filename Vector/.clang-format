@@ -16,7 +16,4 @@ PointerAlignment: Left
 
 SortIncludes: true
 
-SpaceBeforeParens: Custom
-SpaceBeforeParensOptions:
-  AfterPlacementOperator: false
 SpaceBeforeCtorInitializerColon: false
