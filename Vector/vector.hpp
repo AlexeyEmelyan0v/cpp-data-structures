@@ -1,17 +1,26 @@
+#pragma once
+
+#include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <initializer_list>
 #include <iterator>
+#include <memory>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
-template <typename T>
+template <typename T, typename Allocator = std::allocator<T>>
 class Vector {
  private:
   T* data_;
   size_t size_;
   size_t capacity_;
+  [[no_unique_address]] Allocator allocator_;
 
-  static void destroy_elements(T* data, size_t count) noexcept;
+  using AllocTraits = std::allocator_traits<Allocator>;
+
+  void destroy_elements(T* data, size_t count) noexcept;
 
   template <typename U>
   void reallocate_and_push(U&& value);
@@ -20,18 +29,25 @@ class Vector {
   T& reallocate_and_emplace(Args&&... args);
 
  public:
-  Vector();
-  Vector(const Vector& other);
-  Vector(Vector&& other) noexcept;
+  Vector() noexcept(std::is_nothrow_default_constructible_v<Allocator>);
+  explicit Vector(const Allocator& allocator) noexcept;
 
-  explicit Vector(size_t count);
-  Vector(size_t count, const T& value);
-  Vector(std::initializer_list<T> init);
+  Vector(const Vector& other);
+  Vector(const Vector& other, const Allocator& allocator);
+
+  Vector(Vector&& other) noexcept;
+  Vector(Vector&& other, const Allocator& allocator);
+
+  explicit Vector(size_t count, const Allocator& allocator = Allocator());
+
+  Vector(size_t count, const T& value, const Allocator& allocator = Allocator());
+  Vector(std::initializer_list<T> init, const Allocator& allocator = Allocator());
 
   ~Vector();
 
   Vector& operator=(const Vector& other);
-  Vector& operator=(Vector&& other) noexcept;
+  Vector& operator=(Vector&& other) noexcept(AllocTraits::propagate_on_container_move_assignment::value ||
+                                             AllocTraits::is_always_equal::value);
 
   void reserve(size_t newcap);
   void push_back(const T& value);
@@ -43,7 +59,10 @@ class Vector {
   const T* data() const noexcept;
 
   bool empty() const noexcept;
-  void swap(Vector& other) noexcept;
+
+  void swap(Vector& other) noexcept(AllocTraits::propagate_on_container_swap::value ||
+                                    AllocTraits::is_always_equal::value);
+
   void clear() noexcept;
   void pop_back() noexcept;
   void resize(size_t newsize);
@@ -93,6 +112,8 @@ class Vector {
 
   iterator erase(const_iterator pos);
   iterator erase(const_iterator first, const_iterator last);
+
+  Allocator get_allocator() const;
 };
 
 #include "vector.tpp"

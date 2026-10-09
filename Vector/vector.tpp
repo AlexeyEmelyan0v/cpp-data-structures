@@ -1,72 +1,78 @@
-template <typename T>
-void Vector<T>::destroy_elements(T* data, size_t count) noexcept {
+template <typename T, typename Allocator>
+void Vector<T, Allocator>::destroy_elements(T* data, size_t count) noexcept {
   for (size_t i = 0; i < count; ++i) {
-    (data + i)->~T();
+    AllocTraits::destroy(allocator_, data + i);
   }
 }
 
-template <typename T>
+template <typename T, typename Allocator>
 template <typename U>
-void Vector<T>::reallocate_and_push(U&& value) {
+void Vector<T, Allocator>::reallocate_and_push(U&& value) {
   size_t newcap = (capacity_ > 0 ? capacity_ * 2 : 1);
-  T* newdata = reinterpret_cast<T*>(new char[newcap * sizeof(T)]);
+  T* newdata = AllocTraits::allocate(allocator_, newcap);
   size_t index = 0;
   bool new_element_constructed = false;
 
   try {
-    new (newdata + size_) T(std::forward<U>(value));
+    AllocTraits::construct(allocator_, newdata + size_, std::forward<U>(value));
     new_element_constructed = true;
 
     for (; index < size_; ++index) {
-      new (newdata + index) T(std::move_if_noexcept(data_[index]));
+      AllocTraits::construct(allocator_, newdata + index, std::move_if_noexcept(data_[index]));
     }
   } catch (...) {
     destroy_elements(newdata, index);
 
     if (new_element_constructed) {
-      (newdata + size_)->~T();
+      AllocTraits::destroy(allocator_, newdata + size_);
     }
 
-    delete[] reinterpret_cast<char*>(newdata);
+    AllocTraits::deallocate(allocator_, newdata, newcap);
     throw;
   }
 
   destroy_elements(data_, size_);
-  delete[] reinterpret_cast<char*>(data_);
+
+  if (data_ != nullptr) {
+    AllocTraits::deallocate(allocator_, data_, capacity_);
+  }
 
   data_ = newdata;
   capacity_ = newcap;
   ++size_;
 }
 
-template <typename T>
+template <typename T, typename Allocator>
 template <typename... Args>
-T& Vector<T>::reallocate_and_emplace(Args&&... args) {
+T& Vector<T, Allocator>::reallocate_and_emplace(Args&&... args) {
   size_t newcap = (capacity_ > 0 ? capacity_ * 2 : 1);
-  T* newdata = reinterpret_cast<T*>(new char[newcap * sizeof(T)]);
+  T* newdata = AllocTraits::allocate(allocator_, newcap);
   size_t index = 0;
   bool new_element_constructed = false;
 
   try {
-    new (newdata + size_) T(std::forward<Args>(args)...);
+    AllocTraits::construct(allocator_, newdata + size_, std::forward<Args>(args)...);
     new_element_constructed = true;
 
     for (; index < size_; ++index) {
-      new (newdata + index) T(std::move_if_noexcept(data_[index]));
+      AllocTraits::construct(allocator_, newdata + index, std::move_if_noexcept(data_[index]));
     }
   } catch (...) {
     destroy_elements(newdata, index);
 
     if (new_element_constructed) {
-      (newdata + size_)->~T();
+      AllocTraits::destroy(allocator_, newdata + size_);
     }
 
-    delete[] reinterpret_cast<char*>(newdata);
+    AllocTraits::deallocate(allocator_, newdata, newcap);
     throw;
   }
 
   destroy_elements(data_, size_);
-  delete[] reinterpret_cast<char*>(data_);
+
+  if (data_ != nullptr) {
+    AllocTraits::deallocate(allocator_, data_, capacity_);
+  }
 
   data_ = newdata;
   capacity_ = newcap;
@@ -74,140 +80,317 @@ T& Vector<T>::reallocate_and_emplace(Args&&... args) {
   return data_[size_ - 1];
 }
 
-template <typename T>
-Vector<T>::Vector(): data_(nullptr), size_(0), capacity_(0) {}
+template <typename T, typename Allocator>
+Vector<T, Allocator>::Vector() noexcept(std::is_nothrow_default_constructible_v<Allocator>)
+    : data_(nullptr), size_(0), capacity_(0), allocator_() {}
 
-template <typename T>
-Vector<T>::Vector(const Vector& other): data_(nullptr), size_(0), capacity_(0) {
+template <typename T, typename Allocator>
+Vector<T, Allocator>::Vector(const Allocator& allocator) noexcept
+    : data_(nullptr), size_(0), capacity_(0), allocator_(allocator) {}
+
+template <typename T, typename Allocator>
+Vector<T, Allocator>::Vector(const Vector& other)
+    : Vector(other, AllocTraits::select_on_container_copy_construction(other.allocator_)) {}
+
+template <typename T, typename Allocator>
+Vector<T, Allocator>::Vector(const Vector& other, const Allocator& allocator)
+    : data_(nullptr), size_(0), capacity_(0), allocator_(allocator) {
   reserve(other.size_);
 
   try {
     for (; size_ < other.size_; ++size_) {
-      new (data_ + size_) T(other.data_[size_]);
+      AllocTraits::construct(allocator_, data_ + size_, other.data_[size_]);
     }
   } catch (...) {
     destroy_elements(data_, size_);
-    delete[] reinterpret_cast<char*>(data_);
+
+    if (data_ != nullptr) {
+      AllocTraits::deallocate(allocator_, data_, capacity_);
+    }
+
     throw;
   }
 }
 
-template <typename T>
-Vector<T>::Vector(Vector&& other) noexcept
-    : data_(other.data_), size_(other.size_), capacity_(other.capacity_) {
+template <typename T, typename Allocator>
+Vector<T, Allocator>::Vector(Vector&& other) noexcept
+    : data_(other.data_), size_(other.size_), capacity_(other.capacity_), allocator_(std::move(other.allocator_)) {
   other.data_ = nullptr;
   other.size_ = 0;
   other.capacity_ = 0;
 }
 
-template <typename T>
-Vector<T>::Vector(size_t count): data_(nullptr), size_(0), capacity_(0) {
-  reserve(count);
+template <typename T, typename Allocator>
+Vector<T, Allocator>::Vector(Vector&& other, const Allocator& allocator)
+    : data_(nullptr), size_(0), capacity_(0), allocator_(allocator) {
+  if (allocator == other.allocator_) {
+    data_ = other.data_;
+    size_ = other.size_;
+    capacity_ = other.capacity_;
+
+    other.data_ = nullptr;
+    other.size_ = 0;
+    other.capacity_ = 0;
+    return;
+  }
+
+  reserve(other.size_);
 
   try {
-    for (; size_ < count; ++size_) {
-      new (data_ + size_) T();
+    for (; size_ < other.size_; ++size_) {
+      AllocTraits::construct(allocator_, data_ + size_, std::move(other.data_[size_]));
     }
   } catch (...) {
     destroy_elements(data_, size_);
-    delete[] reinterpret_cast<char*>(data_);
+
+    if (data_ != nullptr) {
+      AllocTraits::deallocate(allocator_, data_, capacity_);
+    }
+
     throw;
   }
 }
 
-template <typename T>
-Vector<T>::Vector(size_t count, const T& value): data_(nullptr), size_(0), capacity_(0) {
+template <typename T, typename Allocator>
+Vector<T, Allocator>::Vector(size_t count, const Allocator& allocator)
+    : data_(nullptr), size_(0), capacity_(0), allocator_(allocator) {
   reserve(count);
 
   try {
     for (; size_ < count; ++size_) {
-      new (data_ + size_) T(value);
+      AllocTraits::construct(allocator_, data_ + size_);
     }
   } catch (...) {
     destroy_elements(data_, size_);
-    delete[] reinterpret_cast<char*>(data_);
+
+    if (data_ != nullptr) {
+      AllocTraits::deallocate(allocator_, data_, capacity_);
+    }
+
     throw;
   }
 }
 
-template <typename T>
-Vector<T>::Vector(std::initializer_list<T> init): data_(nullptr), size_(0), capacity_(0) {
+template <typename T, typename Allocator>
+Vector<T, Allocator>::Vector(size_t count, const T& value, const Allocator& allocator)
+    : data_(nullptr), size_(0), capacity_(0), allocator_(allocator) {
+  reserve(count);
+
+  try {
+    for (; size_ < count; ++size_) {
+      AllocTraits::construct(allocator_, data_ + size_, value);
+    }
+  } catch (...) {
+    destroy_elements(data_, size_);
+
+    if (data_ != nullptr) {
+      AllocTraits::deallocate(allocator_, data_, capacity_);
+    }
+
+    throw;
+  }
+}
+
+template <typename T, typename Allocator>
+Vector<T, Allocator>::Vector(std::initializer_list<T> init, const Allocator& allocator)
+    : data_(nullptr), size_(0), capacity_(0), allocator_(allocator) {
   reserve(init.size());
 
   try {
     for (const T& value : init) {
-      new (data_ + size_) T(value);
+      AllocTraits::construct(allocator_, data_ + size_, value);
       ++size_;
     }
   } catch (...) {
     destroy_elements(data_, size_);
-    delete[] reinterpret_cast<char*>(data_);
+
+    if (data_ != nullptr) {
+      AllocTraits::deallocate(allocator_, data_, capacity_);
+    }
+
     throw;
   }
 }
 
-template <typename T>
-Vector<T>::~Vector() {
+template <typename T, typename Allocator>
+Vector<T, Allocator>::~Vector() {
   destroy_elements(data_, size_);
-  delete[] reinterpret_cast<char*>(data_);
+
+  if (data_ != nullptr) {
+    AllocTraits::deallocate(allocator_, data_, capacity_);
+  }
 }
 
-template <typename T>
-Vector<T>& Vector<T>::operator=(const Vector& other) {
-  Vector copy(other);
-  swap(copy);
-  return *this;
-}
-
-template <typename T>
-Vector<T>& Vector<T>::operator=(Vector&& other) noexcept {
+template <typename T, typename Allocator>
+Vector<T, Allocator>& Vector<T, Allocator>::operator=(const Vector& other) {
   if (this == &other) {
     return *this;
   }
 
-  destroy_elements(data_, size_);
-  delete[] reinterpret_cast<char*>(data_);
+  if constexpr (AllocTraits::propagate_on_container_copy_assignment::value) {
+    if (allocator_ != other.allocator_) {
+      destroy_elements(data_, size_);
 
-  data_ = other.data_;
-  size_ = other.size_;
-  capacity_ = other.capacity_;
+      if (data_ != nullptr) {
+        AllocTraits::deallocate(allocator_, data_, capacity_);
+      }
 
-  other.data_ = nullptr;
-  other.size_ = 0;
-  other.capacity_ = 0;
+      data_ = nullptr;
+      size_ = 0;
+      capacity_ = 0;
+    }
+
+    allocator_ = other.allocator_;
+  }
+
+  if (other.size_ > capacity_) {
+    Vector temp(other, allocator_);
+    std::swap(data_, temp.data_);
+    std::swap(size_, temp.size_);
+    std::swap(capacity_, temp.capacity_);
+    return *this;
+  }
+
+  size_t common_size = std::min(size_, other.size_);
+
+  for (size_t i = 0; i < common_size; ++i) {
+    data_[i] = other.data_[i];
+  }
+
+  if (size_ > other.size_) {
+    destroy_elements(data_ + other.size_, size_ - other.size_);
+    size_ = other.size_;
+  } else {
+    size_t old_size = size_;
+
+    try {
+      for (; size_ < other.size_; ++size_) {
+        AllocTraits::construct(allocator_, data_ + size_, other.data_[size_]);
+      }
+    } catch (...) {
+      destroy_elements(data_ + old_size, size_ - old_size);
+      size_ = old_size;
+      throw;
+    }
+  }
 
   return *this;
 }
 
-template <typename T>
-void Vector<T>::reserve(size_t newcap) {
+template <typename T, typename Allocator>
+Vector<T, Allocator>& Vector<T, Allocator>::operator=(Vector&& other) noexcept(
+    AllocTraits::propagate_on_container_move_assignment::value || AllocTraits::is_always_equal::value) {
+  if (this == &other) {
+    return *this;
+  }
+
+  constexpr bool propagate = AllocTraits::propagate_on_container_move_assignment::value;
+
+  constexpr bool always_equal = AllocTraits::is_always_equal::value;
+
+  if constexpr (propagate || always_equal) {
+    destroy_elements(data_, size_);
+
+    if (data_ != nullptr) {
+      AllocTraits::deallocate(allocator_, data_, capacity_);
+    }
+
+    if constexpr (propagate) {
+      allocator_ = std::move(other.allocator_);
+    }
+
+    data_ = other.data_;
+    size_ = other.size_;
+    capacity_ = other.capacity_;
+
+    other.data_ = nullptr;
+    other.size_ = 0;
+    other.capacity_ = 0;
+  } else {
+    if (allocator_ == other.allocator_) {
+      destroy_elements(data_, size_);
+
+      if (data_ != nullptr) {
+        AllocTraits::deallocate(allocator_, data_, capacity_);
+      }
+
+      data_ = other.data_;
+      size_ = other.size_;
+      capacity_ = other.capacity_;
+
+      other.data_ = nullptr;
+      other.size_ = 0;
+      other.capacity_ = 0;
+    } else {
+      if (other.size_ > capacity_) {
+        Vector temp(std::move(other), allocator_);
+        std::swap(data_, temp.data_);
+        std::swap(size_, temp.size_);
+        std::swap(capacity_, temp.capacity_);
+        return *this;
+      }
+
+      const size_t common_size = std::min(size_, other.size_);
+
+      for (size_t i = 0; i < common_size; ++i) {
+        data_[i] = std::move(other.data_[i]);
+      }
+
+      if (size_ > other.size_) {
+        destroy_elements(data_ + other.size_, size_ - other.size_);
+        size_ = other.size_;
+      } else {
+        const size_t old_size = size_;
+
+        try {
+          for (; size_ < other.size_; ++size_) {
+            AllocTraits::construct(allocator_, data_ + size_, std::move(other.data_[size_]));
+          }
+        } catch (...) {
+          destroy_elements(data_ + old_size, size_ - old_size);
+          size_ = old_size;
+          throw;
+        }
+      }
+    }
+  }
+
+  return *this;
+}
+
+template <typename T, typename Allocator>
+void Vector<T, Allocator>::reserve(size_t newcap) {
   if (newcap <= capacity_) {
     return;
   }
 
-  T* newdata = reinterpret_cast<T*>(new char[newcap * sizeof(T)]);
+  T* newdata = AllocTraits::allocate(allocator_, newcap);
   size_t index = 0;
 
   try {
     for (; index < size_; ++index) {
-      new (newdata + index) T(std::move_if_noexcept(data_[index]));
+      AllocTraits::construct(allocator_, newdata + index, std::move_if_noexcept(data_[index]));
     }
   } catch (...) {
     destroy_elements(newdata, index);
-    delete[] reinterpret_cast<char*>(newdata);
+    AllocTraits::deallocate(allocator_, newdata, newcap);
     throw;
   }
 
   destroy_elements(data_, size_);
-  delete[] reinterpret_cast<char*>(data_);
+
+  if (data_ != nullptr) {
+    AllocTraits::deallocate(allocator_, data_, capacity_);
+  }
+
   data_ = newdata;
   capacity_ = newcap;
 }
 
-template <typename T>
-void Vector<T>::push_back(const T& value) {
+template <typename T, typename Allocator>
+void Vector<T, Allocator>::push_back(const T& value) {
   if (size_ < capacity_) {
-    new (data_ + size_) T(value);
+    AllocTraits::construct(allocator_, data_ + size_, value);
     ++size_;
     return;
   }
@@ -215,10 +398,10 @@ void Vector<T>::push_back(const T& value) {
   reallocate_and_push(value);
 }
 
-template <typename T>
-void Vector<T>::push_back(T&& value) {
+template <typename T, typename Allocator>
+void Vector<T, Allocator>::push_back(T&& value) {
   if (size_ < capacity_) {
-    new (data_ + size_) T(std::move(value));
+    AllocTraits::construct(allocator_, data_ + size_, std::move(value));
     ++size_;
     return;
   }
@@ -226,52 +409,59 @@ void Vector<T>::push_back(T&& value) {
   reallocate_and_push(std::move(value));
 }
 
-template <typename T>
-size_t Vector<T>::size() const noexcept {
+template <typename T, typename Allocator>
+size_t Vector<T, Allocator>::size() const noexcept {
   return size_;
 }
 
-template <typename T>
-size_t Vector<T>::capacity() const noexcept {
+template <typename T, typename Allocator>
+size_t Vector<T, Allocator>::capacity() const noexcept {
   return capacity_;
 }
 
-template <typename T>
-T* Vector<T>::data() noexcept {
+template <typename T, typename Allocator>
+T* Vector<T, Allocator>::data() noexcept {
   return data_;
 }
 
-template <typename T>
-const T* Vector<T>::data() const noexcept {
+template <typename T, typename Allocator>
+const T* Vector<T, Allocator>::data() const noexcept {
   return data_;
 }
 
-template <typename T>
-bool Vector<T>::empty() const noexcept {
+template <typename T, typename Allocator>
+bool Vector<T, Allocator>::empty() const noexcept {
   return size_ == 0;
 }
 
-template <typename T>
-void Vector<T>::swap(Vector& other) noexcept {
+template <typename T, typename Allocator>
+void Vector<T, Allocator>::swap(Vector& other) noexcept(AllocTraits::propagate_on_container_swap::value ||
+                                                        AllocTraits::is_always_equal::value) {
+  if constexpr (AllocTraits::propagate_on_container_swap::value) {
+    std::swap(allocator_, other.allocator_);
+  } else {
+    assert(allocator_ == other.allocator_);
+  }
+
   std::swap(data_, other.data_);
   std::swap(size_, other.size_);
   std::swap(capacity_, other.capacity_);
 }
 
-template <typename T>
-void Vector<T>::clear() noexcept {
+template <typename T, typename Allocator>
+void Vector<T, Allocator>::clear() noexcept {
   destroy_elements(data_, size_);
   size_ = 0;
 }
 
-template <typename T>
-void Vector<T>::pop_back() noexcept {
+template <typename T, typename Allocator>
+void Vector<T, Allocator>::pop_back() noexcept {
   --size_;
-  (data_ + size_)->~T();
+  AllocTraits::destroy(allocator_, data_ + size_);
 }
 
-template <typename T>
-void Vector<T>::resize(size_t newsize) {
+template <typename T, typename Allocator>
+void Vector<T, Allocator>::resize(size_t newsize) {
   if (newsize == size_) {
     return;
   }
@@ -287,7 +477,7 @@ void Vector<T>::resize(size_t newsize) {
 
     try {
       for (; index < newsize; ++index) {
-        new (data_ + index) T();
+        AllocTraits::construct(allocator_, data_ + index);
       }
     } catch (...) {
       destroy_elements(data_ + size_, index - size_);
@@ -298,97 +488,104 @@ void Vector<T>::resize(size_t newsize) {
     return;
   }
 
-  T* newdata = reinterpret_cast<T*>(new char[newsize * sizeof(T)]);
+  T* newdata = AllocTraits::allocate(allocator_, newsize);
   size_t new_index = size_;
   size_t old_index = 0;
 
   try {
     for (; new_index < newsize; ++new_index) {
-      new (newdata + new_index) T();
+      AllocTraits::construct(allocator_, newdata + new_index);
     }
 
     for (; old_index < size_; ++old_index) {
-      new (newdata + old_index) T(std::move_if_noexcept(data_[old_index]));
+      AllocTraits::construct(allocator_, newdata + old_index, std::move_if_noexcept(data_[old_index]));
     }
   } catch (...) {
     destroy_elements(newdata, old_index);
     destroy_elements(newdata + size_, new_index - size_);
-    delete[] reinterpret_cast<char*>(newdata);
+    AllocTraits::deallocate(allocator_, newdata, newsize);
     throw;
   }
 
   destroy_elements(data_, size_);
-  delete[] reinterpret_cast<char*>(data_);
+
+  if (data_ != nullptr) {
+    AllocTraits::deallocate(allocator_, data_, capacity_);
+  }
 
   data_ = newdata;
   capacity_ = newsize;
   size_ = newsize;
 }
 
-template <typename T>
-void Vector<T>::shrink_to_fit() {
+template <typename T, typename Allocator>
+void Vector<T, Allocator>::shrink_to_fit() {
   if (capacity_ == size_) {
     return;
   }
 
   if (size_ == 0) {
-    delete[] reinterpret_cast<char*>(data_);
+    AllocTraits::deallocate(allocator_, data_, capacity_);
     data_ = nullptr;
     capacity_ = 0;
     return;
   }
 
-  T* newdata = reinterpret_cast<T*>(new char[size_ * sizeof(T)]);
+  T* newdata = AllocTraits::allocate(allocator_, size_);
   size_t index = 0;
 
   try {
     for (; index < size_; ++index) {
-      new (newdata + index) T(std::move_if_noexcept(data_[index]));
+      AllocTraits::construct(allocator_, newdata + index, std::move_if_noexcept(data_[index]));
     }
   } catch (...) {
     destroy_elements(newdata, index);
-    delete[] reinterpret_cast<char*>(newdata);
+    AllocTraits::deallocate(allocator_, newdata, size_);
     throw;
   }
 
   destroy_elements(data_, size_);
-  delete[] reinterpret_cast<char*>(data_);
+
+  if (data_ != nullptr) {
+    AllocTraits::deallocate(allocator_, data_, capacity_);
+  }
+
   capacity_ = size_;
   data_ = newdata;
 }
 
-template <typename T>
-T& Vector<T>::front() noexcept {
+template <typename T, typename Allocator>
+T& Vector<T, Allocator>::front() noexcept {
   return *data_;
 }
 
-template <typename T>
-const T& Vector<T>::front() const noexcept {
+template <typename T, typename Allocator>
+const T& Vector<T, Allocator>::front() const noexcept {
   return *data_;
 }
 
-template <typename T>
-T& Vector<T>::back() noexcept {
+template <typename T, typename Allocator>
+T& Vector<T, Allocator>::back() noexcept {
   return data_[size_ - 1];
 }
 
-template <typename T>
-const T& Vector<T>::back() const noexcept {
+template <typename T, typename Allocator>
+const T& Vector<T, Allocator>::back() const noexcept {
   return data_[size_ - 1];
 }
 
-template <typename T>
-T& Vector<T>::operator[](size_t index) noexcept {
+template <typename T, typename Allocator>
+T& Vector<T, Allocator>::operator[](size_t index) noexcept {
   return data_[index];
 }
 
-template <typename T>
-const T& Vector<T>::operator[](size_t index) const noexcept {
+template <typename T, typename Allocator>
+const T& Vector<T, Allocator>::operator[](size_t index) const noexcept {
   return data_[index];
 }
 
-template <typename T>
-T& Vector<T>::at(size_t index) {
+template <typename T, typename Allocator>
+T& Vector<T, Allocator>::at(size_t index) {
   if (index >= size_) {
     throw std::out_of_range("Index is out of range");
   }
@@ -396,8 +593,8 @@ T& Vector<T>::at(size_t index) {
   return data_[index];
 }
 
-template <typename T>
-const T& Vector<T>::at(size_t index) const {
+template <typename T, typename Allocator>
+const T& Vector<T, Allocator>::at(size_t index) const {
   if (index >= size_) {
     throw std::out_of_range("Index is out of range");
   }
@@ -405,11 +602,11 @@ const T& Vector<T>::at(size_t index) const {
   return data_[index];
 }
 
-template <typename T>
+template <typename T, typename Allocator>
 template <typename... Args>
-T& Vector<T>::emplace_back(Args&&... args) {
+T& Vector<T, Allocator>::emplace_back(Args&&... args) {
   if (size_ < capacity_) {
-    new (data_ + size_) T(std::forward<Args>(args)...);
+    AllocTraits::construct(allocator_, data_ + size_, std::forward<Args>(args)...);
     ++size_;
     return data_[size_ - 1];
   }
@@ -417,68 +614,68 @@ T& Vector<T>::emplace_back(Args&&... args) {
   return reallocate_and_emplace(std::forward<Args>(args)...);
 }
 
-template <typename T>
-typename Vector<T>::iterator Vector<T>::begin() noexcept {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::iterator Vector<T, Allocator>::begin() noexcept {
   return data_;
 }
 
-template <typename T>
-typename Vector<T>::iterator Vector<T>::end() noexcept {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::iterator Vector<T, Allocator>::end() noexcept {
   return data_ + size_;
 }
 
-template <typename T>
-typename Vector<T>::const_iterator Vector<T>::begin() const noexcept {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::const_iterator Vector<T, Allocator>::begin() const noexcept {
   return data_;
 }
 
-template <typename T>
-typename Vector<T>::const_iterator Vector<T>::end() const noexcept {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::const_iterator Vector<T, Allocator>::end() const noexcept {
   return data_ + size_;
 }
 
-template <typename T>
-typename Vector<T>::const_iterator Vector<T>::cbegin() const noexcept {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::const_iterator Vector<T, Allocator>::cbegin() const noexcept {
   return data_;
 }
 
-template <typename T>
-typename Vector<T>::const_iterator Vector<T>::cend() const noexcept {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::const_iterator Vector<T, Allocator>::cend() const noexcept {
   return data_ + size_;
 }
 
-template <typename T>
-typename Vector<T>::reverse_iterator Vector<T>::rbegin() noexcept {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::reverse_iterator Vector<T, Allocator>::rbegin() noexcept {
   return reverse_iterator(end());
 }
 
-template <typename T>
-typename Vector<T>::reverse_iterator Vector<T>::rend() noexcept {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::reverse_iterator Vector<T, Allocator>::rend() noexcept {
   return reverse_iterator(begin());
 }
 
-template <typename T>
-typename Vector<T>::const_reverse_iterator Vector<T>::rbegin() const noexcept {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::const_reverse_iterator Vector<T, Allocator>::rbegin() const noexcept {
   return const_reverse_iterator(end());
 }
 
-template <typename T>
-typename Vector<T>::const_reverse_iterator Vector<T>::rend() const noexcept {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::const_reverse_iterator Vector<T, Allocator>::rend() const noexcept {
   return const_reverse_iterator(begin());
 }
 
-template <typename T>
-typename Vector<T>::const_reverse_iterator Vector<T>::crbegin() const noexcept {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::const_reverse_iterator Vector<T, Allocator>::crbegin() const noexcept {
   return const_reverse_iterator(cend());
 }
 
-template <typename T>
-typename Vector<T>::const_reverse_iterator Vector<T>::crend() const noexcept {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::const_reverse_iterator Vector<T, Allocator>::crend() const noexcept {
   return const_reverse_iterator(cbegin());
 }
 
-template <typename T>
-typename Vector<T>::iterator Vector<T>::insert(const_iterator pos, size_t count, const T& value) {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::iterator Vector<T, Allocator>::insert(const_iterator pos, size_t count, const T& value) {
   size_t pos_ind = pos - cbegin();
 
   if (count == 0) {
@@ -492,21 +689,21 @@ typename Vector<T>::iterator Vector<T>::insert(const_iterator pos, size_t count,
   }
   */
 
-  T* newdata = reinterpret_cast<T*>(new char[(size_ + count) * sizeof(T)]);
+  T* newdata = AllocTraits::allocate(allocator_, size_ + count);
   size_t count_index = 0;
   size_t index = 0;
 
   try {
     for (; count_index < count; ++count_index) {
-      new (newdata + pos_ind + count_index) T(value);
+      AllocTraits::construct(allocator_, newdata + pos_ind + count_index, value);
     }
 
     for (; index < pos_ind; ++index) {
-      new (newdata + index) T(std::move_if_noexcept(data_[index]));
+      AllocTraits::construct(allocator_, newdata + index, std::move_if_noexcept(data_[index]));
     }
 
     for (; index < size_; ++index) {
-      new (newdata + count + index) T(std::move_if_noexcept(data_[index]));
+      AllocTraits::construct(allocator_, newdata + count + index, std::move_if_noexcept(data_[index]));
     }
   } catch (...) {
     destroy_elements(newdata + pos_ind, count_index);
@@ -518,25 +715,29 @@ typename Vector<T>::iterator Vector<T>::insert(const_iterator pos, size_t count,
       destroy_elements(newdata + pos_ind + count, index - pos_ind);
     }
 
-    delete[] reinterpret_cast<char*>(newdata);
+    AllocTraits::deallocate(allocator_, newdata, size_ + count);
     throw;
   }
 
   destroy_elements(data_, size_);
-  delete[] reinterpret_cast<char*>(data_);
+
+  if (data_ != nullptr) {
+    AllocTraits::deallocate(allocator_, data_, capacity_);
+  }
+
   data_ = newdata;
   size_ += count;
   capacity_ = size_;
   return data_ + pos_ind;
 }
 
-template <typename T>
-typename Vector<T>::iterator Vector<T>::insert(const_iterator pos, const T& value) {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::iterator Vector<T, Allocator>::insert(const_iterator pos, const T& value) {
   return insert(pos, 1, value);
 }
 
-template <typename T>
-typename Vector<T>::iterator Vector<T>::erase(const_iterator first, const_iterator last) {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::iterator Vector<T, Allocator>::erase(const_iterator first, const_iterator last) {
   size_t count = last - first;
   size_t first_ind = first - cbegin();
 
@@ -553,13 +754,13 @@ typename Vector<T>::iterator Vector<T>::erase(const_iterator first, const_iterat
   return data_ + first_ind;
 }
 
-template <typename T>
-typename Vector<T>::iterator Vector<T>::erase(const_iterator pos) {
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::iterator Vector<T, Allocator>::erase(const_iterator pos) {
   return erase(pos, pos + 1);
 }
 
-template <typename T>
-bool operator==(const Vector<T>& left, const Vector<T>& right) {
+template <typename T, typename Allocator>
+bool operator==(const Vector<T, Allocator>& left, const Vector<T, Allocator>& right) {
   if (left.size() != right.size()) {
     return false;
   }
@@ -573,7 +774,12 @@ bool operator==(const Vector<T>& left, const Vector<T>& right) {
   return true;
 }
 
-template <typename T>
-void swap(Vector<T>& left, Vector<T>& right) noexcept {
+template <typename T, typename Allocator>
+Allocator Vector<T, Allocator>::get_allocator() const {
+  return allocator_;
+}
+
+template <typename T, typename Allocator>
+void swap(Vector<T, Allocator>& left, Vector<T, Allocator>& right) noexcept(noexcept(left.swap(right))) {
   left.swap(right);
 }
