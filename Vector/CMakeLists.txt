@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(Vector)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -8,3 +9,17 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(vector_test main.cpp)
 
 target_include_directories(vector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_compile_options(vector_test PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wconversion
+    -Wshadow
+    -fsanitize=address,undefined
+    -fno-omit-frame-pointer
+)
+
+target_link_options(vector_test PRIVATE
+    -fsanitize=address,undefined
+)
