@@ -107,7 +107,7 @@ class Vector {
   const_reverse_iterator crend() const noexcept;
 
   iterator insert(const_iterator pos, const T& value);
-  // iterator insert(const_iterator pos, T&& value);
+  iterator insert(const_iterator pos, T&& value);
   iterator insert(const_iterator pos, size_t count, const T& value);
 
   iterator erase(const_iterator pos);

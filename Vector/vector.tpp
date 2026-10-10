@@ -438,7 +438,8 @@ template <typename T, typename Allocator>
 void Vector<T, Allocator>::swap(Vector& other) noexcept(AllocTraits::propagate_on_container_swap::value ||
                                                         AllocTraits::is_always_equal::value) {
   if constexpr (AllocTraits::propagate_on_container_swap::value) {
-    std::swap(allocator_, other.allocator_);
+    using std::swap;
+    swap(allocator_, other.allocator_);
   } else {
     assert(allocator_ == other.allocator_);
   }
@@ -682,14 +683,60 @@ typename Vector<T, Allocator>::iterator Vector<T, Allocator>::insert(const_itera
     return data_ + pos_ind;
   }
 
-  /*
   if (capacity_ >= size_ + count) {
-    T value_copy = value;
-  TODO
-  }
-  */
+    const size_t old_size = size_;
+    const size_t elements_after = old_size - pos_ind;
+    size_t constructed = 0;
 
-  T* newdata = AllocTraits::allocate(allocator_, size_ + count);
+    try {
+      if (elements_after == 0) {
+        for (; constructed < count; ++constructed) {
+          AllocTraits::construct(allocator_, data_ + old_size + constructed, value);
+        }
+      } else if (elements_after >= count) {
+        T value_copy = value;
+
+        for (size_t i = old_size - count; i < old_size; ++i) {
+          AllocTraits::construct(allocator_, data_ + i + count, std::move_if_noexcept(data_[i]));
+          ++constructed;
+        }
+
+        for (size_t i = old_size - count; i-- > pos_ind;) {
+          data_[i + count] = std::move(data_[i]);
+        }
+
+        for (size_t i = pos_ind; i < pos_ind + count; ++i) {
+          data_[i] = value_copy;
+        }
+      } else {
+        T value_copy = value;
+        const size_t extra = count - elements_after;
+
+        for (size_t i = 0; i < extra; ++i) {
+          AllocTraits::construct(allocator_, data_ + old_size + i, value_copy);
+          ++constructed;
+        }
+
+        for (size_t i = pos_ind; i < old_size; ++i) {
+          AllocTraits::construct(allocator_, data_ + i + count, std::move_if_noexcept(data_[i]));
+          ++constructed;
+        }
+
+        for (size_t i = pos_ind; i < old_size; ++i) {
+          data_[i] = value_copy;
+        }
+      }
+    } catch (...) {
+      destroy_elements(data_ + old_size, constructed);
+      throw;
+    }
+
+    size_ = old_size + count;
+    return data_ + pos_ind;
+  }
+
+  const size_t newcap = std::max(size_ + count, capacity_ == 0 ? size_t{1} : capacity_ * 2);
+  T* newdata = AllocTraits::allocate(allocator_, newcap);
   size_t count_index = 0;
   size_t index = 0;
 
@@ -715,7 +762,7 @@ typename Vector<T, Allocator>::iterator Vector<T, Allocator>::insert(const_itera
       destroy_elements(newdata + pos_ind + count, index - pos_ind);
     }
 
-    AllocTraits::deallocate(allocator_, newdata, size_ + count);
+    AllocTraits::deallocate(allocator_, newdata, newcap);
     throw;
   }
 
@@ -727,13 +774,91 @@ typename Vector<T, Allocator>::iterator Vector<T, Allocator>::insert(const_itera
 
   data_ = newdata;
   size_ += count;
-  capacity_ = size_;
+  capacity_ = newcap;
   return data_ + pos_ind;
 }
 
 template <typename T, typename Allocator>
 typename Vector<T, Allocator>::iterator Vector<T, Allocator>::insert(const_iterator pos, const T& value) {
   return insert(pos, 1, value);
+}
+
+template <typename T, typename Allocator>
+typename Vector<T, Allocator>::iterator Vector<T, Allocator>::insert(const_iterator pos, T&& value) {
+  const size_t pos_ind = pos - cbegin();
+
+  if (size_ < capacity_) {
+    if (pos_ind == size_) {
+      AllocTraits::construct(allocator_, data_ + size_, std::move(value));
+      ++size_;
+      return data_ + pos_ind;
+    }
+
+    T value_move = std::move(value);
+    bool tail_constructed = false;
+
+    try {
+      AllocTraits::construct(allocator_, data_ + size_, std::move_if_noexcept(data_[size_ - 1]));
+      tail_constructed = true;
+
+      for (size_t i = size_ - 1; i-- > pos_ind;) {
+        data_[i + 1] = std::move(data_[i]);
+      }
+
+      data_[pos_ind] = std::move(value_move);
+    } catch (...) {
+      if (tail_constructed) {
+        AllocTraits::destroy(allocator_, data_ + size_);
+      }
+      throw;
+    }
+
+    ++size_;
+    return data_ + pos_ind;
+  }
+
+  const size_t newcap = std::max(size_ + 1, capacity_ == 0 ? size_t{1} : capacity_ * 2);
+  T* newdata = AllocTraits::allocate(allocator_, newcap);
+  size_t index = 0;
+  bool inserted = false;
+
+  try {
+    AllocTraits::construct(allocator_, newdata + pos_ind, std::move(value));
+    inserted = true;
+
+    for (; index < pos_ind; ++index) {
+      AllocTraits::construct(allocator_, newdata + index, std::move_if_noexcept(data_[index]));
+    }
+
+    for (; index < size_; ++index) {
+      AllocTraits::construct(allocator_, newdata + index + 1, std::move_if_noexcept(data_[index]));
+    }
+  } catch (...) {
+    if (inserted) {
+      AllocTraits::destroy(allocator_, newdata + pos_ind);
+    }
+
+    if (index < pos_ind) {
+      destroy_elements(newdata, index);
+    } else {
+      destroy_elements(newdata, pos_ind);
+      destroy_elements(newdata + pos_ind + 1, index - pos_ind);
+    }
+
+    AllocTraits::deallocate(allocator_, newdata, newcap);
+    throw;
+  }
+
+  destroy_elements(data_, size_);
+
+  if (data_ != nullptr) {
+    AllocTraits::deallocate(allocator_, data_, capacity_);
+  }
+
+  data_ = newdata;
+  capacity_ = newcap;
+  ++size_;
+  return data_ + pos_ind;
 }
 
 template <typename T, typename Allocator>
